@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { localPathStringSchema } from "../localPath.js";
 import { IDENTIFIER_PATTERN } from "../stringPatterns.js";
+import { webScreenshotArtifactSchema } from "../webScreenshot.js";
 
 /**
  * Device serials as adb prints them: emulator-5554, USB identifiers, and
@@ -154,6 +155,12 @@ export const adbInputSchemas = {
     output_directory: localPathStringSchema.describe(
       "Local directory for the captured PNG; must not already contain it",
     ),
+    include_artifact: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Also embed the PNG bytes in the Evidence as a self-verifying base64 artifact, so comparisons and visual claims can be recomputed from the bundle; base64 enlarges the result by about a third",
+      ),
   }),
   list_adb_processes: z.strictObject({
     serial: deviceSerialSchema.describe(
@@ -558,15 +565,30 @@ export const adbResultSchemas = {
     overwritten: z.boolean(),
     device_digest_source: z.enum(["device_sha256sum", "unavailable"]),
   }),
-  capture_adb_screen: z.strictObject({
-    client,
-    serial: z.string().min(1),
-    local_path: z.string().min(1),
-    bytes: z.number().int().nonnegative(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    width: z.number().int().positive().nullable(),
-    height: z.number().int().positive().nullable(),
-  }),
+  capture_adb_screen: z
+    .strictObject({
+      client,
+      serial: z.string().min(1),
+      local_path: z.string().min(1),
+      bytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      width: z.number().int().positive().nullable(),
+      height: z.number().int().positive().nullable(),
+      /** Present only when the capture was requested with `include_artifact`. */
+      artifact: webScreenshotArtifactSchema.optional(),
+    })
+    .superRefine((capture, context) => {
+      if (
+        capture.artifact !== undefined &&
+        (capture.artifact.sha256 !== capture.sha256 ||
+          capture.artifact.bytes !== capture.bytes)
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["artifact"],
+          message: "Screen capture artifact disagrees with the captured PNG",
+        });
+    }),
   list_adb_processes: z.strictObject({
     client,
     serial: z.string().min(1),

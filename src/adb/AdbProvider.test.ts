@@ -962,15 +962,42 @@ exit 1`,
   const output = join(root, "captures");
   const result = await evidenceResult(providerOver(binary), {
     operation: "capture_adb_screen",
-    input: { serial: "emulator-5554", output_directory: output },
+    input: {
+      serial: "emulator-5554",
+      output_directory: output,
+      include_artifact: false,
+    },
   });
   expect(result).toMatchObject({ width: 4, height: 3 });
+  expect(result).not.toHaveProperty("artifact");
   expect(
     await readFile(join(output, "screen.png")).then(
       (bytes) => bytes.subarray(1, 4).toString("latin1") === "PNG",
       () => false,
     ),
   ).toBe(true);
+
+  const retained = join(root, "retained");
+  const withArtifact = await evidenceResult(providerOver(binary), {
+    operation: "capture_adb_screen",
+    input: {
+      serial: "emulator-5554",
+      output_directory: retained,
+      include_artifact: true,
+    },
+  });
+  const written = await readFile(join(retained, "screen.png"));
+  const digest = createHash("sha256").update(written).digest("hex");
+  expect(withArtifact).toMatchObject({
+    sha256: digest,
+    bytes: written.byteLength,
+    artifact: {
+      sha256: digest,
+      bytes: written.byteLength,
+      media_type: "image/png",
+      data_base64: written.toString("base64"),
+    },
+  });
 });
 
 it("lists processes, features, and services through fixed commands", async () => {
@@ -1495,7 +1522,11 @@ printf '\\211PNG\\r\\n\\032\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\004\\0\\0\\0\\003'
   );
   const result = await providerOver(binary).execute({
     operation: "capture_adb_screen",
-    input: { serial: "device", output_directory: join(root, "captures") },
+    input: {
+      serial: "device",
+      output_directory: join(root, "captures"),
+      include_artifact: false,
+    },
   });
   expect(result.ok).toBe(false);
   expect(await readFile(join(root, "captures", "screen.png"), "utf8")).toBe(

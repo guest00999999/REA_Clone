@@ -28,6 +28,7 @@ import type {
   AdbRequest,
 } from "../domain/adb/adbDeviceAnalysis.js";
 import { adbResultSchemas } from "../domain/adb/adbDeviceAnalysis.js";
+import { createWebScreenshotArtifact } from "../domain/webScreenshot.js";
 import {
   AnalysisArtifactChangedError,
   AnalysisCancelledError,
@@ -2194,7 +2195,11 @@ export class AdbProvider {
     selection: AdbBinarySelection,
     client: ClientIdentity,
     provider: ProviderIdentity,
-    input: { readonly serial: string; readonly output_directory: string },
+    input: {
+      readonly serial: string;
+      readonly output_directory: string;
+      readonly include_artifact: boolean;
+    },
     signal: AbortSignal | undefined,
   ): Promise<Result<AnalysisExecution, AnalysisError>> {
     const directory = await prepareOutputDirectory(
@@ -2245,6 +2250,9 @@ export class AdbProvider {
           sha256,
           width: dimensions.width,
           height: dimensions.height,
+          ...(input.include_artifact
+            ? { artifact: createWebScreenshotArtifact(captured.value.stdout) }
+            : {}),
         },
         provider,
         {

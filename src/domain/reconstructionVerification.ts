@@ -41,24 +41,46 @@ import {
   reconstructionUnknownHeads,
 } from "./reconstructionUnknowns.js";
 import type { ResidualUnknown } from "./residualUnknown.js";
+import { visualClaimFacts } from "./reconstructionVisualClaims.js";
+
+const DERIVED_COMPARISON = {
+  confidence: "derived",
+  authority: "analyst-inference",
+} as const;
 
 const providers = {
   behavioral: {
     operation: "compare_process_captures",
     predicates: ["rea.process-comparison"],
     ...PROCESS_PROVIDER,
+    ...DERIVED_COMPARISON,
   },
   "structural-function": {
     operation: "compare_functions",
     predicates: ["rea.function-comparison"],
     id: "rea-function-comparison",
     name: "REA function comparison",
+    version: "1",
+    ...DERIVED_COMPARISON,
   },
   "structural-artifact": {
     operation: "compare_artifacts",
     predicates: ["rea.artifact-comparison"],
     id: "rea-artifact-comparison",
     name: "REA artifact comparison",
+    version: "1",
+    ...DERIVED_COMPARISON,
+  },
+  // compare_web_screenshots measures caller-supplied artifacts and links no
+  // source Evidence; visual claims bind each side to capture Evidence by digest.
+  visual: {
+    operation: "compare_web_screenshots",
+    predicates: ["rea.web-screenshot-diff"],
+    id: "rea-cdp-browser",
+    name: "REA Chrome DevTools Protocol observation provider",
+    version: "2",
+    confidence: "observed",
+    authority: "external-service",
   },
 } as const;
 
@@ -109,7 +131,9 @@ export const verifyReconstruction = (
       failed,
       unknown: unresolved,
       behavioral: results.filter(({ kind }) => kind === "behavioral").length,
-      structural: results.filter(({ kind }) => kind !== "behavioral").length,
+      structural: results.filter(({ kind }) => kind.startsWith("structural-"))
+        .length,
+      visual: results.filter(({ kind }) => kind === "visual").length,
     },
     claims: {
       items: results,
@@ -134,6 +158,36 @@ const evaluateClaim = (
       `Missing comparison Evidence ${claim.comparison_evidence_id}`,
     );
   validateComparisonIdentity(claim, comparison);
+  if (claim.kind === "visual") {
+    const facts = visualClaimFacts(claim, comparison, records);
+    const unknowns = reconstructionClaimUnknowns(
+      heads,
+      comparison.evidence_id,
+      facts.sourceIds,
+      claim.dimension,
+    );
+    return reconstructionClaimResultSchema.parse({
+      claim_id: claim.claim_id,
+      kind: claim.kind,
+      dimension: claim.dimension,
+      status: classify(facts.observed, facts.limitations, unknowns),
+      observed_status: facts.observed,
+      comparison_evidence_id: comparison.evidence_id,
+      left_evidence_ids: facts.sides.left,
+      right_evidence_ids: facts.sides.right,
+      evidence_links: uniqueSorted([
+        comparison.evidence_id,
+        ...facts.sourceIds,
+      ]),
+      unknown_ids: unknowns.map(({ unknown_id: id }) => id),
+      limitations: uniqueSorted([
+        ...comparison.limitations,
+        ...facts.limitations,
+        ...unknowns.map(({ question }) => `Residual unknown: ${question}`),
+      ]),
+      visual: facts.visual,
+    });
+  }
   const sides = comparisonSourceEvidenceSides(comparison);
   const allSourceIds = uniqueSorted([...sides.left, ...sides.right]);
   if (!sameSet(comparison.evidence_links, allSourceIds))
@@ -189,7 +243,7 @@ const evaluateClaim = (
 };
 
 const readValidatedSourceFacts = (
-  claim: Claim,
+  claim: Exclude<Claim, { kind: "visual" }>,
   sources: readonly Evidence[],
 ): readonly FunctionSourceFacts[] => {
   const expected =
@@ -236,16 +290,16 @@ const validateComparisonIdentity = (claim: Claim, evidence: Evidence): void => {
       ? !isProcessEvidenceProvider(evidence.provider)
       : evidence.provider.id !== expected.id ||
         evidence.provider.name !== expected.name ||
-        evidence.provider.version !== "1") ||
-    evidence.confidence !== "derived" ||
-    evidence.authority !== "analyst-inference" ||
+        evidence.provider.version !== expected.version) ||
+    evidence.confidence !== expected.confidence ||
+    evidence.authority !== expected.authority ||
     evidence.subject !== null
   )
     throw new TypeError("Comparison Evidence identity or authority disagrees");
 };
 
 const comparisonObservation = (
-  claim: Claim,
+  claim: Exclude<Claim, { kind: "visual" }>,
   evidence: Evidence,
 ): {
   readonly status: ObservedStatus;
@@ -317,7 +371,7 @@ const validateProcessStatus = (
 };
 
 const authorityLimitations = (
-  claim: Claim,
+  claim: Exclude<Claim, { kind: "visual" }>,
   sources: readonly Evidence[],
   sides: {
     readonly left: readonly string[];

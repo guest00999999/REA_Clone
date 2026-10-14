@@ -42,13 +42,54 @@ const artifactClaimSchema = z.object({
   dimension: z.literal("overall"),
 });
 
+const pixelRegionSchema = z.strictObject({
+  x: z.number().int().min(0),
+  y: z.number().int().min(0),
+  width: z.number().int().min(1),
+  height: z.number().int().min(1),
+});
+const visualClaimSchema = z.object({
+  ...commonClaim,
+  kind: z.literal("visual"),
+  dimension: z.literal("pixels"),
+  before_evidence_id: evidenceIdSchema.describe(
+    "Screenshot capture Evidence whose artifact is the comparison's before side",
+  ),
+  after_evidence_id: evidenceIdSchema.describe(
+    "Screenshot capture Evidence whose artifact is the comparison's after side",
+  ),
+  channel_threshold: z
+    .number()
+    .int()
+    .min(0)
+    .max(255)
+    .describe("Channel threshold the comparison must have used"),
+  max_changed_ratio: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe("Largest changed-pixel ratio that still passes"),
+  mask: z
+    .strictObject({
+      rationale: titleSchema.describe("Why these regions are excluded"),
+      regions: z.array(pixelRegionSchema).min(1),
+      max_masked_ratio: z
+        .number()
+        .gt(0)
+        .max(1)
+        .describe("Largest share of the screenshot the regions may exclude"),
+    })
+    .optional(),
+});
+
 const reconstructionClaimSchema = z.discriminatedUnion("kind", [
   behavioralClaimSchema,
   functionClaimSchema,
   artifactClaimSchema,
+  visualClaimSchema,
 ]);
 
-/** Finite, typed behavioral and structural specification. */
+/** Finite, typed behavioral, structural, and visual specification. */
 export const reconstructionSpecificationSchema = z
   .object({
     name: z.string().trim().min(1),
@@ -76,7 +117,12 @@ export const reconstructionVerificationInputSchema = z.strictObject({
 
 export const reconstructionClaimResultSchema = z.object({
   claim_id: claimIdSchema,
-  kind: z.enum(["behavioral", "structural-function", "structural-artifact"]),
+  kind: z.enum([
+    "behavioral",
+    "structural-function",
+    "structural-artifact",
+    "visual",
+  ]),
   dimension: z.string().min(1),
   status: verificationStatusSchema,
   observed_status: z.enum([
@@ -94,6 +140,17 @@ export const reconstructionClaimResultSchema = z.object({
   evidence_links: z.array(evidenceIdSchema).min(2),
   unknown_ids: z.array(unknownIdSchema),
   limitations: z.array(z.string()),
+  visual: z
+    .object({
+      channel_threshold: z.number().int().min(0).max(255),
+      max_changed_ratio: z.number().min(0).max(1),
+      compared_pixels: z.number().int().min(0),
+      changed_pixels: z.number().int().min(0).nullable(),
+      changed_ratio: z.number().min(0).max(1).nullable(),
+      masked_pixels: z.number().int().min(0),
+      recomputed: z.boolean(),
+    })
+    .optional(),
 });
 
 /** Evidence-cited result over every declared claim. */
@@ -108,6 +165,8 @@ export const reconstructionVerificationResultSchema = z
       unknown: z.number().int().min(0),
       behavioral: z.number().int().min(0),
       structural: z.number().int().min(0),
+      /** Absent in results recorded before visual claims existed. */
+      visual: z.number().int().min(0).optional(),
     }),
     claims: z.object({
       items: z.array(reconstructionClaimResultSchema),
@@ -134,7 +193,8 @@ export const reconstructionVerificationResultSchema = z
         ["summary", "total"],
       ],
       [
-        summary.total !== summary.behavioral + summary.structural,
+        summary.total !==
+          summary.behavioral + summary.structural + (summary.visual ?? 0),
         "Claim kind counts must equal the summary total",
         ["summary", "total"],
       ],

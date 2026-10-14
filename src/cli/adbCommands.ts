@@ -187,11 +187,16 @@ export const registerAdbCommands = (
         .string()
         .min(1)
         .describe("Local directory for screen.png"),
+      "include-artifact": z
+        .boolean()
+        .default(false)
+        .describe("Embed the PNG bytes in the Evidence as base64"),
     }),
     run: ({ args, options }) =>
       execute(CLI_COMMANDS.captureAdbScreen, "capture_adb_screen", {
         serial: args.serial,
         output_directory: options["output-directory"],
+        include_artifact: options["include-artifact"],
       }),
   });
   cli.command(CLI_COMMANDS.listAdbProcesses, {

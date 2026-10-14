@@ -2,16 +2,19 @@ import { crc32, deflateSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
-import { comparePngScreenshots } from "./PngVisualDiff.js";
+import {
+  comparePngScreenshots,
+  measurePngScreenshots,
+} from "./webScreenshotPixels.js";
 import {
   AnalysisResourceConstraintError,
   AnalysisUnsupportedTargetError,
-} from "../domain/analysisErrorCore.js";
+} from "./analysisErrorCore.js";
 import {
   compareWebScreenshotsInputSchema,
   createWebScreenshotArtifact,
   webScreenshotDiffSchema,
-} from "../domain/webScreenshot.js";
+} from "./webScreenshot.js";
 
 describe("PNG visual diff", () => {
   it("reports exact changed-pixel and channel metrics", () => {
@@ -150,6 +153,40 @@ describe("PNG visual diff", () => {
         compared_pixels: 2,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("PNG masked measurement", () => {
+  it("counts changed pixels outside excluded regions without altering the diff", () => {
+    const black = [0, 0, 0, 255];
+    const white = [255, 255, 255, 255];
+    const before = artifact(2, 2, [...black, ...black, ...black, ...black]);
+    const after = artifact(2, 2, [...white, ...black, ...black, ...white]);
+    const input = compareWebScreenshotsInputSchema.parse({ before, after });
+
+    const masked = measurePngScreenshots(input, [
+      { x: 0, y: 0, width: 1, height: 1 },
+    ]);
+    expect(masked.diff).toEqual(comparePngScreenshots(input));
+    expect(masked.masked).toEqual({
+      compared_pixels: 3,
+      changed_pixels: 1,
+      masked_pixels: 1,
+    });
+    expect(measurePngScreenshots(input, []).masked).toEqual({
+      compared_pixels: 4,
+      changed_pixels: 2,
+      masked_pixels: 0,
+    });
+    expect(
+      measurePngScreenshots(
+        compareWebScreenshotsInputSchema.parse({
+          before,
+          after: artifact(1, 1, black),
+        }),
+        [],
+      ).masked,
+    ).toBeNull();
   });
 });
 

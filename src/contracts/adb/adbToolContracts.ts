@@ -146,7 +146,7 @@ export const ADB_TOOL_CONTRACTS = [
     name: "capture_adb_screen",
     ...toolContractMetadata("capture_adb_screen"),
     description:
-      "Capture one frame of the device screen as a PNG (`screencap -p` through exec-out, no device-side file) into a caller-selected output directory, digesting it and reporting its dimensions. No recording or interaction.",
+      "Capture one frame of the device screen as a PNG (`screencap -p` through exec-out, no device-side file) into a caller-selected output directory, digesting it and reporting its dimensions. Set `include_artifact` to also embed the PNG as a self-verifying base64 artifact (same digest and size) that `compare_web_screenshots` and visual reconstruction claims can use without the local file. No recording or interaction.",
     kind: "adb-provider",
     inputSchema: adbInputSchemas.capture_adb_screen,
     outputSchema: evidenceResultOf(adbResultSchemas.capture_adb_screen),
@@ -156,6 +156,14 @@ export const ADB_TOOL_CONTRACTS = [
         input: {
           serial: "emulator-5554",
           output_directory: "/tmp/rea-captures",
+        },
+      },
+      {
+        title: "Capture the screen with its pixels retained in the Evidence",
+        input: {
+          serial: "emulator-5554",
+          output_directory: "/tmp/rea-captures",
+          include_artifact: true,
         },
       },
     ],

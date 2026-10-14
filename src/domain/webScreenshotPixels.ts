@@ -4,12 +4,12 @@ import type {
   CompareWebScreenshotsInput,
   WebScreenshotArtifact,
   WebScreenshotDiff,
-} from "../domain/webScreenshot.js";
+} from "./webScreenshot.js";
 import {
   AnalysisResourceConstraintError,
   AnalysisUnsupportedTargetError,
-} from "../domain/analysisErrorCore.js";
-import { decodeCanonicalBase64 } from "../domain/webScreenshot.js";
+} from "./analysisErrorCore.js";
+import { decodeCanonicalBase64 } from "./webScreenshot.js";
 
 interface DecodedPng {
   readonly width: number;
@@ -33,10 +33,37 @@ interface ParsedPng {
 const PNG_COMPARISON_WORKING_MEMORY_BYTES = 256 * 1024 * 1024;
 const PNG_INFLATE_CHUNK_BYTES = zlibConstants.Z_DEFAULT_CHUNK;
 
+/** Pixel rectangle in screenshot coordinates. */
+export interface ScreenshotPixelRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Changed-pixel counts over the pixels outside excluded regions. */
+export interface MaskedScreenshotChanges {
+  readonly compared_pixels: number;
+  readonly changed_pixels: number;
+  readonly masked_pixels: number;
+}
+
 /** Compare two validated screenshots using deterministic RGBA metrics. */
 export const comparePngScreenshots = (
   input: CompareWebScreenshotsInput,
-): WebScreenshotDiff => {
+): WebScreenshotDiff => measurePngScreenshots(input, []).diff;
+
+/**
+ * Compare two screenshots once, also counting changes outside excluded regions.
+ * `masked` is null when the dimensions differ and no pixel is comparable.
+ */
+export const measurePngScreenshots = (
+  input: CompareWebScreenshotsInput,
+  excludedRegions: readonly ScreenshotPixelRegion[],
+): {
+  readonly diff: WebScreenshotDiff;
+  readonly masked: MaskedScreenshotChanges | null;
+} => {
   admitEncodedInputPair(input.before, input.after);
   const beforePlan = parsePng(input.before, "before");
   const afterPlan = parsePng(input.after, "after");
@@ -45,18 +72,23 @@ export const comparePngScreenshots = (
   const after = decodePng(afterPlan);
   if (before.width !== after.width || before.height !== after.height)
     return {
-      status: "dimension_mismatch",
-      before: dimensions(before),
-      after: dimensions(after),
-      channel_threshold: input.channel_threshold,
-      compared_pixels: 0,
-      changed_pixels: null,
-      changed_ratio: null,
-      maximum_channel_delta: null,
-      mean_absolute_channel_delta: null,
-      limitations: limitations(),
+      diff: {
+        status: "dimension_mismatch",
+        before: dimensions(before),
+        after: dimensions(after),
+        channel_threshold: input.channel_threshold,
+        compared_pixels: 0,
+        changed_pixels: null,
+        changed_ratio: null,
+        maximum_channel_delta: null,
+        mean_absolute_channel_delta: null,
+        limitations: limitations(),
+      },
+      masked: null,
     };
   let changedPixels = 0;
+  let maskedPixels = 0;
+  let maskedChangedPixels = 0;
   let maximumDelta = 0;
   let totalDelta = 0;
   for (let offset = 0; offset < before.rgba.length; offset += 4) {
@@ -71,8 +103,20 @@ export const comparePngScreenshots = (
       if (delta > input.channel_threshold) changed = true;
     }
     if (changed) changedPixels += 1;
+    if (excludedRegions.length === 0) continue;
+    const pixel = offset / 4;
+    const x = pixel % before.width;
+    if (insideAny(excludedRegions, x, (pixel - x) / before.width))
+      maskedPixels += 1;
+    else if (changed) maskedChangedPixels += 1;
   }
   const pixels = before.width * before.height;
+  const masked = {
+    compared_pixels: pixels - maskedPixels,
+    changed_pixels:
+      excludedRegions.length === 0 ? changedPixels : maskedChangedPixels,
+    masked_pixels: maskedPixels,
+  };
   const context = {
     before: dimensions(before),
     after: dimensions(after),
@@ -84,18 +128,37 @@ export const comparePngScreenshots = (
   };
   if (changedPixels === 0)
     return {
-      ...context,
-      status: "identical",
-      changed_pixels: 0,
-      changed_ratio: 0,
+      diff: {
+        ...context,
+        status: "identical",
+        changed_pixels: 0,
+        changed_ratio: 0,
+      },
+      masked,
     };
   return {
-    ...context,
-    status: "different",
-    changed_pixels: changedPixels,
-    changed_ratio: changedPixels / pixels,
+    diff: {
+      ...context,
+      status: "different",
+      changed_pixels: changedPixels,
+      changed_ratio: changedPixels / pixels,
+    },
+    masked,
   };
 };
+
+const insideAny = (
+  regions: readonly ScreenshotPixelRegion[],
+  x: number,
+  y: number,
+): boolean =>
+  regions.some(
+    (region) =>
+      x >= region.x &&
+      x < region.x + region.width &&
+      y >= region.y &&
+      y < region.y + region.height,
+  );
 
 const parsePng = (
   artifact: WebScreenshotArtifact,

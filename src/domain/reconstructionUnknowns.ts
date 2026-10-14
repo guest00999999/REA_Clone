@@ -142,8 +142,14 @@ const defaultProbe = (
           operation: "analyze_function",
           rationale: "Capture complete function dossiers under equal limits.",
         }
-      : {
-          operation: "inspect_artifact",
-          rationale:
-            "Capture complete artifact inventories under equal limits.",
-        };
+      : kind === "visual"
+        ? {
+            operation: "capture_web_screenshot",
+            rationale:
+              "Recapture both screens with retained pixels under one viewport (capture_web_screenshot, or capture_adb_screen with include_artifact) and compare them with the declared threshold.",
+          }
+        : {
+            operation: "inspect_artifact",
+            rationale:
+              "Capture complete artifact inventories under equal limits.",
+          };

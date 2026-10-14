@@ -47,6 +47,13 @@ or absence:
   hypotheses, not causality.
 - `verify_reconstruction` evaluates a finite typed specification. A pass covers
   only declared comparable claims, not global equivalence.
+  Visual claims cite a `compare_web_screenshots` record and its two source
+  captures; they pass only when retained pixels reproduce the comparison under
+  the declared threshold and mask. ADB captures keep only their digest unless
+  `capture_adb_screen` runs with `include_artifact: true`, which embeds the PNG
+  as a self-verifying base64 artifact (same digest and size, about a third
+  larger); without it, their visual claims stay unknown. Pixel parity is not
+  behavioral equivalence.
 
 Process captures are opt-in behavioral evidence, not a security sandbox. V3
 captures cannot be upgraded to V4; rerun the original scenario. Distinguish root
